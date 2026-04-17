@@ -126,6 +126,8 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'monitor' | 'config' | 'alerts'>('monitor');
   const [logs, setLogs] = useState<LogEntry[]>(INITIAL_LOGS);
   const [isSimulating, setIsSimulating] = useState(false);
+  const [selectedLog, setSelectedLog] = useState<LogEntry | null>(null);
+  const [showSaveToast, setShowSaveToast] = useState(false);
   const [config, setConfig] = useState<Config>({
     endpoint: 'https://api.tickets-premium.enterprise.com/v1',
     authType: 'Bearer Token',
@@ -133,7 +135,37 @@ export default function App() {
     timeout: 15000
   });
 
-  // --- Statistics ---
+  // --- Actions ---
+  const triggerManualRequest = () => {
+    const statuses: StatusType[] = [200, 200, 401, 429, 500];
+    const randomStatus = statuses[Math.floor(Math.random() * statuses.length)];
+    
+    const newLog: LogEntry = {
+      id: Math.random().toString(36).substr(2, 9),
+      traceId: `MANUAL-${new Date().toISOString().replace(/[-:T]/g, '').slice(0, 8)}-${Math.floor(Math.random() * 1000000)}`,
+      timestamp: new Date().toISOString(),
+      method: 'POST',
+      endpoint: '/v1/tickets/manual',
+      status: randomStatus,
+      strategy: randomStatus === 200 ? 'None' : (randomStatus === 401 ? 'Sin Reintento (Refresh)' : 'Backoff Exponencial'),
+      retries: randomStatus === 200 ? '0/' + config.maxRetries : `${Math.floor(Math.random() * config.maxRetries) + 1}/${config.maxRetries}`,
+      latency: Math.floor(Math.random() * 200) + 30,
+      alertSent: randomStatus === 500,
+    };
+
+    setLogs(prev => [newLog, ...prev].slice(0, 50));
+  };
+
+  const resolveAlert = (id: string) => {
+    setLogs(prev => prev.map(log => 
+      log.id === id ? { ...log, alertSent: false } : log
+    ));
+  };
+
+  const handleSaveConfig = () => {
+    setShowSaveToast(true);
+    setTimeout(() => setShowSaveToast(false), 3000);
+  };
   const stats = useMemo(() => {
     const success = logs.filter(l => l.status === 200).length;
     const rate = logs.length > 0 ? (success / logs.length) * 100 : 0;
@@ -157,7 +189,7 @@ export default function App() {
         endpoint: '/v1/tickets',
         status: randomStatus,
         strategy: randomStatus === 200 ? 'None' : (randomStatus === 401 ? 'Sin Reintento (Refresh)' : 'Backoff Exponencial'),
-        retries: randomStatus === 200 ? '0/3' : `${Math.floor(Math.random() * 3) + 1}/3`,
+        retries: randomStatus === 200 ? '0/' + config.maxRetries : `${Math.floor(Math.random() * config.maxRetries)}/${config.maxRetries}`,
         latency: Math.floor(Math.random() * 400) + 50,
         alertSent: randomStatus === 500,
       };
@@ -243,6 +275,13 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-4">
+            <button 
+              onClick={triggerManualRequest}
+              className="px-4 py-1.5 rounded-lg text-xs font-semibold bg-blue-600/10 text-blue-500 border border-blue-500/20 hover:bg-blue-600 hover:text-white transition-all flex items-center gap-2"
+            >
+              <Server className="w-3 h-3" />
+              Probar Endpoint
+            </button>
             <div className="relative">
               <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
               <input 
@@ -366,7 +405,10 @@ export default function App() {
                               <span className={`text-[11px] ${log.latency > 1000 ? 'text-rose-400 font-bold' : 'text-slate-500'}`}>{log.latency}ms</span>
                             </td>
                             <td className="px-6 py-4 text-right">
-                              <button className="p-2 rounded-lg bg-slate-800/50 text-slate-500 opacity-0 group-hover:opacity-100 transition-all hover:bg-slate-700 hover:text-white">
+                              <button 
+                                onClick={() => setSelectedLog(log)}
+                                className="p-2 rounded-lg bg-slate-800/50 text-slate-500 opacity-0 group-hover:opacity-100 transition-all hover:bg-slate-700 hover:text-white"
+                              >
                                 <ExternalLink className="w-3.5 h-3.5" />
                               </button>
                             </td>
@@ -474,7 +516,10 @@ export default function App() {
                   </div>
 
                   <div className="pt-6 border-t border-slate-800/50 flex gap-4">
-                    <button className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl text-sm transition-all shadow-lg shadow-blue-500/10">
+                    <button 
+                      onClick={handleSaveConfig}
+                      className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl text-sm transition-all shadow-lg shadow-blue-500/10"
+                    >
                       Guardar Cambios
                     </button>
                     <button className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold py-3 rounded-xl text-sm transition-all">
@@ -482,6 +527,20 @@ export default function App() {
                     </button>
                   </div>
                 </div>
+
+                <AnimatePresence>
+                  {showSaveToast && (
+                    <motion.div 
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 10 }}
+                      className="flex items-center gap-3 bg-emerald-500 text-white px-6 py-3 rounded-xl font-bold text-sm shadow-xl shadow-emerald-500/20"
+                    >
+                      <CheckCircle2 className="w-4 h-4" />
+                      Configuración actualizada correctamente
+                    </motion.div>
+                  )}
+                </AnimatePresence>
 
                 <div className="bg-amber-500/5 border border-amber-500/10 rounded-2xl p-6 flex items-start gap-4">
                   <AlertCircle className="w-5 h-5 text-amber-500 mt-0.5" />
@@ -527,8 +586,18 @@ export default function App() {
                       </p>
 
                       <div className="flex gap-3">
-                        <button className="flex-1 bg-slate-800 hover:bg-slate-700 text-white text-[10px] font-bold py-2 rounded-lg transition-colors">IGNORAR</button>
-                        <button className="flex-1 bg-rose-600/20 hover:bg-rose-600/30 text-rose-500 text-[10px] font-bold py-2 rounded-lg transition-colors border border-rose-500/20">VER DETALLES</button>
+                        <button 
+                          onClick={() => resolveAlert(alert.id)}
+                          className="flex-1 bg-slate-800 hover:bg-slate-700 text-white text-[10px] font-bold py-2 rounded-lg transition-colors uppercase tracking-wider"
+                        >
+                          Marcar como Resuelta
+                        </button>
+                        <button 
+                          onClick={() => setSelectedLog(alert)}
+                          className="flex-1 bg-rose-600/20 hover:bg-rose-600/30 text-rose-500 text-[10px] font-bold py-2 rounded-lg transition-colors border border-rose-500/20 uppercase tracking-wider"
+                        >
+                          Auditar Trazas
+                        </button>
                       </div>
                     </div>
                   ))}
@@ -546,6 +615,98 @@ export default function App() {
           )}
         </div>
       </main>
+
+      {/* Log Detail Modal */}
+      <AnimatePresence>
+        {selectedLog && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-8 bg-[#000]/80 backdrop-blur-sm"
+          >
+            <motion.div 
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.9, y: 20 }}
+              className="bg-[#0F0F12] border border-slate-800 w-full max-w-2xl rounded-2xl overflow-hidden shadow-2xl shadow-blue-500/5"
+            >
+              <div className="p-6 border-b border-slate-800 flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className={`p-2 rounded-lg ${selectedLog.status === 200 ? 'bg-emerald-500/10 text-emerald-500' : 'bg-rose-500/10 text-rose-500'}`}>
+                    <Server className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-white font-bold">Detalle de Petición</h3>
+                    <p className="text-[10px] text-slate-500 uppercase font-mono tracking-widest">{selectedLog.traceId}</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setSelectedLog(null)}
+                  className="p-2 hover:bg-slate-800 rounded-lg transition-colors"
+                >
+                  <LogOut className="w-4 h-4 text-slate-500 rotate-180" />
+                </button>
+              </div>
+              
+              <div className="p-8 space-y-6">
+                <div className="grid grid-cols-2 gap-8">
+                  <div className="space-y-4">
+                    <div className="space-y-1">
+                      <span className="text-[10px] font-bold text-slate-600 uppercase">Contexto Petición</span>
+                      <div className="text-sm text-slate-300 font-mono bg-slate-900/50 p-3 rounded-lg border border-slate-800">
+                        {selectedLog.method} {selectedLog.endpoint}
+                      </div>
+                    </div>
+                    <div className="space-y-1">
+                      <span className="text-[10px] font-bold text-slate-600 uppercase">Estado HTTP</span>
+                      <div><StatusBadge status={selectedLog.status} /></div>
+                    </div>
+                  </div>
+                  <div className="space-y-4">
+                    <div className="space-y-1">
+                      <span className="text-[10px] font-bold text-slate-600 uppercase">Resiliencia</span>
+                      <div className="text-sm text-slate-300">{selectedLog.strategy}</div>
+                    </div>
+                    <div className="space-y-1">
+                      <span className="text-[10px] font-bold text-slate-600 uppercase">Timestamp</span>
+                      <div className="text-sm text-slate-300">{new Date(selectedLog.timestamp).toLocaleString()}</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <span className="text-[10px] font-bold text-slate-600 uppercase">Cuerpo de Respuesta (Simulado)</span>
+                  <pre className="bg-slate-950 p-4 rounded-xl text-xs font-mono text-blue-400 border border-slate-800 overflow-x-auto">
+                    {JSON.stringify({
+                      status: selectedLog.status,
+                      trace_id: selectedLog.traceId,
+                      payload: {
+                        message: selectedLog.status === 200 ? "Ticket procesado con éxito" : "Error de comunicación con el middleware",
+                        server_node: "Nexus-Node-Delta-01",
+                        execution_latency: `${selectedLog.latency}ms`
+                      },
+                      metadata: {
+                        environment: "Production",
+                        region: "eu-west-1"
+                      }
+                    }, null, 2)}
+                  </pre>
+                </div>
+              </div>
+
+              <div className="p-6 bg-slate-900/50 border-t border-slate-800 flex justify-end">
+                <button 
+                  onClick={() => setSelectedLog(null)}
+                  className="px-6 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl transition-all"
+                >
+                  Cerrar Auditoría
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
